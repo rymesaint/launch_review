@@ -26,26 +26,31 @@ import java.util.List;
  * LaunchReviewPlugin
  */
 public class LaunchReviewPlugin implements MethodCallHandler, FlutterPlugin, ActivityAware {
-    Activity activity;
+    private MethodChannel channel;
+    private Activity activity;
 
-    private static LaunchReviewPlugin register(LaunchReviewPlugin plugin, BinaryMessenger messenger, Activity activity) {
-        final MethodChannel channel = new MethodChannel(messenger, "launch_review");
-        plugin.activity = activity;
-        channel.setMethodCallHandler(plugin);
-        return plugin;
+    @Override
+    public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+        channel = new MethodChannel(binding.getBinaryMessenger(), "launch_review");
+        channel.setMethodCallHandler(this);
     }
 
-    /**
-     * Plugin registration.
-     */
-    @SuppressWarnings("deprecation")
-    public static void registerWith(PluginRegistry.Registrar registrar) {
-        register(new LaunchReviewPlugin(), registrar.messenger(), registrar.activity());
+    @Override
+    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        if (channel != null) {
+            channel.setMethodCallHandler(null);
+            channel = null;
+        }
     }
 
     @Override
     public void onMethodCall(MethodCall call, Result result) {
         if (call.method.equals("launch")) {
+            if (activity == null) {
+                result.error("NO_ACTIVITY", "Plugin is not attached to an activity.", null);
+                return;
+            }
+
             String appId = call.argument("android_id");
             String toastMessage = call.argument("toast_message");
             boolean showToast = call.argument("show_toast");
@@ -54,71 +59,43 @@ public class LaunchReviewPlugin implements MethodCallHandler, FlutterPlugin, Act
                 appId = activity.getPackageName();
             }
 
-            if (toastMessage == null){
+            if (toastMessage == null) {
                 toastMessage = "Please Rate Application";
             }
-            Intent rateIntent = new Intent(Intent.ACTION_VIEW,
-                    Uri.parse("market://details?id=" + appId));
+
+            Intent rateIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + appId));
             boolean marketFound = false;
 
-            // find all applications able to handle our rateIntent
-            final List<ResolveInfo> otherApps =  activity.getPackageManager()
-                    .queryIntentActivities(rateIntent, 0);
-            for (ResolveInfo otherApp: otherApps) {
-                // look for Google Play application
-                if (otherApp.activityInfo.applicationInfo.packageName
-                        .equals("com.android.vending")) {
-
+            List<ResolveInfo> otherApps = activity.getPackageManager().queryIntentActivities(rateIntent, 0);
+            for (ResolveInfo otherApp : otherApps) {
+                if (otherApp.activityInfo.applicationInfo.packageName.equals("com.android.vending")) {
                     ActivityInfo otherAppActivity = otherApp.activityInfo;
                     ComponentName componentName = new ComponentName(
                             otherAppActivity.applicationInfo.packageName,
                             otherAppActivity.name
                     );
-                    // make sure it does NOT open in the stack of your activity
-                    rateIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    // task reparenting if needed
-                    rateIntent.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                    // if the Google Play was already open in a search result
-                    //  this make sure it still go to the app page you requested
-                    rateIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                    // this make sure only the Google Play app is allowed to
-                    // intercept the intent
                     rateIntent.setComponent(componentName);
-                   if (showToast){
+                    rateIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    if (showToast) {
                         Toast.makeText(activity, toastMessage, Toast.LENGTH_SHORT).show();
-                   } 
-
+                    }
                     activity.startActivity(rateIntent);
                     marketFound = true;
                     break;
-
                 }
             }
 
-            // if GP not present on device, open web browser
             if (!marketFound) {
                 try {
-                    activity.startActivity(new Intent(Intent.ACTION_VIEW,
-                            Uri.parse("market://details?id=" + appId)));
+                    activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + appId)));
                 } catch (ActivityNotFoundException e) {
-                    activity.startActivity(new Intent(Intent.ACTION_VIEW,
-                            Uri.parse("https://play.google.com/store/apps/details?id=" + appId)));
+                    activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + appId)));
                 }
             }
             result.success(null);
-        }  else {
+        } else {
             result.notImplemented();
         }
-    }
-
-    @Override
-    public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
-        register(this, binding.getBinaryMessenger(), null);
-    }
-
-    @Override
-    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-
     }
 
     @Override
@@ -128,16 +105,16 @@ public class LaunchReviewPlugin implements MethodCallHandler, FlutterPlugin, Act
 
     @Override
     public void onDetachedFromActivityForConfigChanges() {
-
+        activity = null;
     }
 
     @Override
     public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
-
+        activity = binding.getActivity();
     }
 
     @Override
     public void onDetachedFromActivity() {
-
+        activity = null;
     }
 }
